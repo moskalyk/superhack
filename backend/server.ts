@@ -5,14 +5,25 @@ import cors from 'cors'
 import {ethers, utils} from 'ethers'
 import { SequenceIndexerClient } from '@0xsequence/indexer'
 
+// Sequence Relayer
+import { v2 } from '@0xsequence/core'
+import { RpcRelayer } from '@0xsequence/relayer'
+import { Orchestrator } from '@0xsequence/signhub'
+import { Wallet  } from '@0xsequence/wallet'
+
 const pkey = process.env.pkey!
-const wallet = new ethers.Wallet(pkey);
+const pkey2 = process.env.pkey2!
+const pkey3 = process.env.pkey3!
+
+const wallet = new ethers.Wallet(pkey3);
+
 const PORT = process.env.PORT || 4000
 const app = express();
 
-const provider = new ethers.providers.JsonRpcProvider('https://nodes.sequence.app/optimism');
+const providerOptimism = new ethers.providers.JsonRpcProvider('https://nodes.sequence.app/optimism');
 
-const indexer = new SequenceIndexerClient('https://optimism-indexer.sequence.app')
+let indexer: any = new SequenceIndexerClient('https://optimism-indexer.sequence.app')
+const indexerBase = new SequenceIndexerClient('https://base-goerli-indexer.sequence.app')
 
 const corsOptions = {
     origin: ['http://localhost:3000'],
@@ -21,6 +32,11 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 app.use(bodyParser.json())
+
+let provider: any = new ethers.providers.JsonRpcProvider('https://nodes.sequence.app/base-goerli')
+const walletEOA = new ethers.Wallet(pkey3, provider)
+const relayer = new RpcRelayer({url: 'https://base-goerli-relayer.sequence.app', provider: provider})
+const relayerOptimism = new RpcRelayer({url: 'https://optimism-relayer.sequence.app', provider: providerOptimism})
 
 //blueberry api
 var user_access_token = "";
@@ -42,24 +58,20 @@ async function loginAndGetData(email, password) {
     returnSecureToken: true,
   });
 
-  // try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body,
-    });
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body,
+  });
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! Status: ${response.status}`);
-    }
+  if (!response.ok) {
+    throw new Error(`HTTP error! Status: ${response.status}`);
+  }
 
-    const data = await response.json();
-    user_access_token = data.idToken;
-    user_id = data.localId;
-    return await fetchData(user_id);
-  // } catch (error) {
-    // console.error('Error logging in:', email, error.message);
-  // }
+  const data = await response.json();
+  user_access_token = data.idToken;
+  user_id = data.localId;
+  return await fetchData(user_id);
 }
 
 function normalizeArray(arr) {
@@ -196,7 +208,7 @@ function isLessThan60SecondsAgo(dateString) {
   const timeDifference = currentDate - inputDate;
 
   // Compare the time difference with 60,000 milliseconds (60 seconds)
-  return timeDifference < 20000 /*00000*/;
+  return timeDifference < 60000 /*00000*/;
 }
 
 const apiKey = process.env.API_KEY_WEATHER; // Replace with your actual API key
@@ -209,10 +221,10 @@ const apiUrl = `http://api.openweathermap.org/data/2.5/weather?q=${city},${count
 // Function to get the sunrise time
 async function getSunriseTime() {
   try {
-    console.log(apiUrl)
+    // console.log(apiUrl)
     const response = await fetch(apiUrl);
     const data = await response.json();
-    console.log(data)
+    // console.log(data)
     if (data.cod === 200) {
       const sunriseTimestamp = data.sys.sunrise;
       const sunriseTime = new Date(sunriseTimestamp * 1000); // Convert to milliseconds
@@ -225,17 +237,20 @@ async function getSunriseTime() {
   }
 }
 
-// Call the function to get the sunrise time and log it
-
-app.post('/bridge/quote', async (req: any, res: any) => {
+app.post('/quote/bridge', async (req: any, res: any) => {
+  let start = Date.now()
   // listen for transactions in the last minute
   // if true sign message, and return
 
-  // try any account address you'd like :)
   const filter = {
-      accountAddress: "0xBAbebe9FE973a5735D486BF6D31e9a027248024e"
+      accountAddress: req.body.address
   }
+  if('→' != req.body.direction){
+    indexer = indexerBase
+  } else {
 
+  }
+  
   // query Sequence Indexer for all token transaction history on Polygon
   const transactionHistory = await indexer.getTransactionHistory({
       filter: filter,
@@ -252,19 +267,19 @@ app.post('/bridge/quote', async (req: any, res: any) => {
                 password: process.env.PASSWORD_2
             }
         ]
+  
 
-  console.log('transaction history in account:', transactionHistory)
   for(let i = 0; i < transactionHistory.transactions.length; i++){
     for(let j = 0; j < transactionHistory.transactions[i].transfers.length; j++){
-      if(transactionHistory.transactions[i].transfers[j].to == '0x0000000000000000000000000000000000000000' && Number(transactionHistory.transactions[i].transfers[j].amounts[0]) >= Number(req.body.amount)&& isLessThan60SecondsAgo(transactionHistory.transactions[i].timestamp)){
-        const promises = users.map((user: any) => loginAndGetData(user.email, user.password));
+      if(transactionHistory.transactions[i].transfers[j].to == '0x64fab353dbdb239d4eeee3d50bbcf87f3adbb4ad' && Number(transactionHistory.transactions[i].transfers[j].amounts[0]) >= Number(req.body.amount)&& isLessThan60SecondsAgo(transactionHistory.transactions[i].timestamp)){
         let price;
-        console.log('running')
-
         try {
+          const promises = users.map((user: any) => loginAndGetData(user.email, user.password));
+          console.log('running')
           const results = await Promise.all(promises);
           console.log('testing')
-          price = Math.floor(findCosineSimilarityInArrays(results)*100)
+          price = Math.floor(findCosineSimilarityInArrays(results)*10**18)
+          console.log(`COSINE SIMILIARITY ${price}`)
         }catch(err){
           const sunriseTime = await getSunriseTime()
           const ratio = (86400*1000-(Date.now()-Number(sunriseTime)))/(86400*1000)
@@ -272,17 +287,16 @@ app.post('/bridge/quote', async (req: any, res: any) => {
             const mappedValue = (sineValue + 1) / 2; // Map from -1 to 1 to 0 to 1
           
             console.log('Mapped sine value:', 10*1*10**18*(97.5+5*mappedValue)/100);
-            price = 1*10**18*(97.5+5*mappedValue)/100
+            price = 1*10**18*mappedValue
+            // price = 1*10**18*(97.5+5*mappedValue)/100
         }
-
         const latestBlockNumber = await provider.getBlockNumber();
-        const hash = utils.solidityKeccak256(['uint', 'uint', 'uint'], [price, latestBlockNumber, 10])
+        const chainId = 84531
+        console.log([price.toString(), latestBlockNumber, req.body.address, chainId])
+        const hash = utils.solidityKeccak256(['uint', 'uint', 'address', 'uint'], [price.toString(), latestBlockNumber, req.body.address, chainId])
         const signature = await wallet.signMessage(ethers.utils.arrayify(hash))
 
-        // perform onchain transaction
-
-        // your contract address
-        const contractAddress = '0x'
+        const contractAddress = '0x64FAB353dbdb239D4EEeE3D50bBCF87F3adbB4AD'
 
           // Craft your transaction
         const erc20Interface = new ethers.utils.Interface([
@@ -291,11 +305,11 @@ app.post('/bridge/quote', async (req: any, res: any) => {
       
         const data = erc20Interface.encodeFunctionData(
           'bridge', [
-            req.body.accountAddress,
+            req.body.address,
             req.body.amount,
             latestBlockNumber,
-            price,
-            10,
+            price.toString(),
+            84531,
             signature
           ])
 
@@ -304,9 +318,56 @@ app.post('/bridge/quote', async (req: any, res: any) => {
           data
         }
 
-        // TODO: perform relay
+        const context = v2.DeployedWalletContext;
 
-        res.send({tx: txn})
+        // Initialize the wallet config
+        const config = v2.config.ConfigCoder.fromSimple({
+            threshold: 1,
+            checkpoint: 0,
+            signers: [{ weight: 1, address: walletEOA.address }]
+        })
+
+        if('→' == req.body.direction){
+          // let provider = providerBase
+            const relayerSequenceWallet = Wallet.newWallet({
+              context: context,
+              coders: v2.coders,
+              config,
+              provider,
+              relayer,
+              orchestrator: new Orchestrator([walletEOA]), // dont you just wonder, what line the Orchestrator class will end up on? running on 12
+              chainId: 84531
+          })
+
+          try{
+            const restxn = await relayerSequenceWallet.sendTransaction(txn)
+            console.log(restxn)
+          }catch(err){
+            console.log(err)
+          }
+        }else {
+          let provider = providerOptimism
+          let relayer = relayerOptimism
+          const relayerSequenceWallet = Wallet.newWallet({
+              context: context,
+              coders: v2.coders,
+              config,
+              provider,
+              relayer,
+              orchestrator: new Orchestrator([walletEOA]), // dont you just wonder, what line the Orchestrator class will end up on? running on 12
+              chainId: 10
+          })
+
+          try{
+            const restxn = await relayerSequenceWallet.sendTransaction(txn)
+            console.log(restxn)
+          }catch(err){
+            console.log(err)
+          }
+        }
+        let end = Date.now()
+        console.log(`time ${(end - start) / 1000}`)
+        res.send({tx: txn, amount:  Number(req.body.amount)*(100 + 5*(price / 10**18))/100})
         breakTrue = true 
         break;
       } else {
@@ -335,19 +396,17 @@ app.get('/quote', async (req: any, res: any) => {
         try{
           const promises = users.map((user: any) => loginAndGetData(user.email, user.password));
           results = await Promise.all(promises);
-          price = Math.floor(findCosineSimilarityInArrays(results)*100)
+          price = Math.floor(findCosineSimilarityInArrays(results)*10**18)
         }catch(err){
+          console.log(err)
           const sunriseTime = await getSunriseTime()
           const ratio = (86400*1000-(Date.now()-Number(sunriseTime)))/(86400*1000)
             const sineValue = Math.sin(ratio * Math.PI * 2); // Using 2 * PI to complete one full cycle
             const mappedValue = (sineValue + 1) / 2; // Map from -1 to 1 to 0 to 1
-          
-            console.log('Elapsed ratio:', ratio);
-            console.log('Mapped sine value:', 10*1*10**18);
-            console.log('Mapped sine value:', 10*1*10**18*(97.5+5*mappedValue)/100);
             price = 1*10**18*(97.5+5*mappedValue)/100
         }
-        const latestBlockNumber = await provider.getBlockNumber();
+        console.log(price)
+        const latestBlockNumber = await providerOptimism.getBlockNumber();
         const hash = utils.solidityKeccak256(['uint', 'uint'], [price.toString(), latestBlockNumber])
         const signature = await wallet.signMessage(ethers.utils.arrayify(hash))
         console.log('testing')
